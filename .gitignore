@@ -1,0 +1,14 @@
+.env
+
+*.exe
+*.out
+*.test
+
+test.txt
+downloaded-test.txt
+big-file.txt
+
+.idea/
+.vscode/
+
+.DS_Store
