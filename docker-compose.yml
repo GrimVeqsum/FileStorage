@@ -1,70 +1,83 @@
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: file-storage-postgres
+    image: postgres:16.15-alpine3.24
     environment:
-      POSTGRES_DB: file_storage
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-file_storage}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d file_storage"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
-    container_name: file-storage-minio
-    command: server /data --console-address ":9001"
+    build:
+      context: .
+      dockerfile: deploy/minio.Dockerfile
+    command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9000/minio/health/ready"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
 
   migrate:
-    image: migrate/migrate:v4.17.1
-    container_name: file-storage-migrate
+    image: migrate/migrate:v4.20.1
     volumes:
-      - ./migrations:/migrations
-    command:
-      [
-        "-path",
-        "/migrations",
-        "-database",
-        "postgres://postgres:postgres@postgres:5432/file_storage?sslmode=disable",
-        "up"
-      ]
+      - ./migrations:/migrations:ro
+    command: ["-path", "/migrations", "-database", "${DATABASE_URL:?Set DATABASE_URL in .env}", "up"]
     depends_on:
       postgres:
         condition: service_healthy
+    restart: "no"
 
   app:
-    platform: linux/amd64
     build: .
-    container_name: file-storage-app
-    env_file:
-      - .env
+    environment:
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY in .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY in .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-files}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-20}
     ports:
-      - "8080:8080"
+      - "${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/server", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    stop_grace_period: 45s
+    restart: unless-stopped
 
+# Keep these names: Compose continues to use the original project volumes.
 volumes:
   postgres_data:
   minio_data:

@@ -1,22 +1,17 @@
-FROM --platform=linux/amd64 golang:1.25-alpine AS builder
-
-WORKDIR /app
-
+FROM golang:1.26.10-alpine3.24 AS builder
+WORKDIR /src
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 COPY go.mod go.sum ./
 RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN go build -trimpath -ldflags='-s -w' -o /out/server ./cmd/app
 
-COPY . .
-
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /server ./cmd/app
-
-FROM --platform=linux/amd64 alpine:3.20
-
+FROM alpine:3.24.3
+RUN addgroup -S -g 10001 app && adduser -S -D -H -u 10001 -G app app
 WORKDIR /app
-
-COPY --from=builder /server /app/server
-
-RUN chmod +x /app/server
-
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder --chown=app:app /out/server /app/server
+USER app:app
 EXPOSE 8080
-
-CMD ["/app/server"]
+ENTRYPOINT ["/app/server"]

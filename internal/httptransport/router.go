@@ -25,7 +25,7 @@ func NewRouter(fileHandler *files.Handler, fileService *files.Service) http.Hand
 
 		err := fileService.Ready(ctx)
 		if err != nil {
-			slog.Error("readiness check failed", "error", err)
+			slog.Error("readiness check failed")
 			response.Error(w, http.StatusServiceUnavailable, "service_not_ready", "service is not ready")
 			return
 		}

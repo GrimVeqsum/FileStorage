@@ -1,0 +1,39 @@
+# Intentionally independent of docker-compose.yml and of the developer's .env.
+# scripts/test-integration.sh supplies a unique Compose project for each run.
+services:
+  postgres:
+    image: postgres:16.15-alpine3.24
+    environment:
+      POSTGRES_DB: filestorage_test
+      POSTGRES_USER: filestorage_test
+      POSTGRES_PASSWORD: integration-only-password
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "filestorage_test", "-d", "filestorage_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    build:
+      context: .
+      dockerfile: deploy/minio.Dockerfile
+    environment:
+      MINIO_ROOT_USER: integration-only-key
+      MINIO_ROOT_PASSWORD: integration-only-secret
+    ports:
+      - "127.0.0.1::9000"
+    volumes:
+      - minio_test_data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9000/minio/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres_test_data:
+  minio_test_data:
